@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Virtaz AI Assistent</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #f9f9f9; }
+    h1 { font-size: 2rem; }
+    video { border: 2px solid #ccc; width: 100%; max-width: 800px; margin-top: 1rem; }
+    textarea, button, select { margin-top: 1rem; width: 100%; padding: 1rem; font-size: 1rem; }
+    #response {
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 1rem;
+      min-height: 100px;
+      margin-top: 1rem;
+      white-space: pre-line;
+      font-family: monospace;
+    }
+    .chat-log { margin-top: 2rem; }
+    .chat-log h3 { margin-bottom: 0.5rem; }
+    .chat-entry { border-bottom: 1px solid #ddd; padding: 0.5rem 0; }
+    .timestamp { color: #888; font-size: 0.9rem; }
+    .copy-btn { margin-top: 0.5rem; padding: 0.5rem; float: right; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>Virtaz AI Assistent</h1>
+  <label style="display: block; margin-top: 1rem;">
+    👤 Brukernavn:
+    <input type="text" id="userName" placeholder="Ditt navn" />
+  </label>
+  
+  <label style="display: block; margin-top: 1rem;">
+    🔊 Les opp AI-svar:
+    <input type="checkbox" id="ttsToggle" checked />
+  </label>
+
+  <button onclick="startScreenShare()">▶ Del skjerm</button>
+  <video id="screenVideo" autoplay muted></video>
+
+  <select id="toneSelect">
+    <option value="Du er en hjelpsom assistent.">Standard</option>
+    <option value="Du er en produktivitetscoach som gir korte, konkrete tips.">Coach</option>
+    <option value="Du er en kreativ og inspirerende idépartner.">Kreativ</option>
+    <option value="Du er kritisk og detaljorientert korrekturleser.">Korrektur</option>
+    <option value="Du er avslappet og uformell, nesten som en venn.">Avslappet</option>
+  </select>
+
+  <button onclick="resetConversation()">🔁 Nullstill samtale</button>
+  <button onclick="exportConversation()">📁 Last ned samtale</button>
+
+  <textarea id="userInput" placeholder="Spør assistenten om noe basert på skjermen..."></textarea>
+  <button onclick="captureAndAsk()">✉ Spør med skjermanalyse</button>
+  <button onclick="askOnlyQuestion()">✉ Bare spør uten skjermanalyse</button>
+  <button onclick="askOnlyScreen()">✨ Bare analyser skjerm</button>
+
+  <div id="response">AI-svar vises her...</div>
+
+  <div class="chat-log">
+    <h3>📅 Logg:</h3>
+    <div id="chatLog"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+  <script>
+    let stream;
+    let messageHistory = [];
+
+    function saveToLog(question, answer) {
+      const log = JSON.parse(localStorage.getItem("virtaz_chat_log")) || [];
+      const entry = {
+        time: new Date().toLocaleTimeString(),
+        q: question,
+        a: answer
+      };
+      log.unshift(entry);
+      localStorage.setItem("lucid_chat_log", JSON.stringify(log));
+      updateLogDisplay();
+
+    // Last inn lagret brukernavn
+    const savedUser = localStorage.getItem('virtaz_user');
+    if (savedUser) document.getElementById('userName').value = savedUser;
+
+    function resetConversation() {
+      messageHistory = [];
+      document.getElementById('response').innerText = '🧼 Samtale nullstilt';
+    }
+
+    function exportConversation() {
+      const blob = new Blob([
+        messageHistory.map(m => `${m.role.toUpperCase()}:
+${m.content}
+
+`).join('')
+      ], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'virtaz_samtale.txt';
+      a.click();
+    }
+    }
+
+    function updateLogDisplay() {
+      const log = JSON.parse(localStorage.getItem("lucid_chat_log")) || [];
+      const chatLog = document.getElementById("chatLog");
+      chatLog.innerHTML = "";
+      log.forEach(entry => {
+        chatLog.innerHTML += `
+          <div class="chat-entry">
+            <div class="timestamp">${entry.time}</div>
+            <strong>Du:</strong> ${entry.q}<br>
+            <strong>AI:</strong> ${entry.a}
+            <button class="copy-btn" onclick="navigator.clipboard.writeText(\"${entry.a.replace(/"/g, '')}\")">Kopier svar</button>
+          </div>
+        `;
+      });
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    async function startScreenShare() {
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const video = document.getElementById('screenVideo');
+        video.srcObject = stream;
+        return new Promise(resolve => {
+          video.onloadedmetadata = () => {
+            video.play();
+            resolve();
+          };
+        });
+      } catch (err) {
+        alert("Kunne ikke dele skjerm: " + err);
+      }
+    }
+
+    async function captureScreenText() {
+      const video = document.getElementById('screenVideo');
+      await new Promise(r => setTimeout(r, 300));
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+      return text.trim();
+    }
+
+    async function captureAndAsk() {
+      const screenText = await captureScreenText();
+      const question = document.getElementById('userInput').value;
+      const user = document.getElementById('userName').value || 'Bruker';
+      const fullInput = `${user} spør: "${question}"
+Skjerminnhold: ${screenText}`;
+      askAssistant(fullInput, question);
+    }
+
+    async function askOnlyQuestion() {
+      const question = document.getElementById('userInput').value;
+      askAssistant(question, question);
+    }
+
+    async function askOnlyScreen() {
+      const screenText = await captureScreenText();
+      askAssistant(screenText, '[Kun skjermanalyse]');
+    }
+
+    async function askAssistant(input, questionToLog) {
+      const userName = document.getElementById('userName').value || 'Bruker';
+      localStorage.setItem('lucid_user', userName);
+      const responseDiv = document.getElementById('response');
+      const tone = document.getElementById('toneSelect').value;
+
+      responseDiv.innerText = "🧠 Sender til AI...";
+
+      messageHistory.push({ role: "user", content: input });
+
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer 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"
+        },
+        body: JSON.stringify({
+          model: "gpt-4-1106-preview",
+          messages: [
+            { role: "system", content: tone + ' Du er også en AI-assistent som analyserer skjerminnhold brukeren deler. Som standard gir du oppsummerte, produktive svar med den viktigste informasjonen, men du kan også utdype hvis brukeren ber om det.' },
+            ...messageHistory
+          ]
+        })
+      });
+
+      const data = await res.json();
+      const answer = data.choices?.[0]?.message?.content || "Ingen respons";
+      responseDiv.innerText = answer;
+      if (document.getElementById('ttsToggle').checked) {
+        const utterance = new SpeechSynthesisUtterance(answer);
+        speechSynthesis.speak(utterance);
+      }
+      messageHistory.push({ role: "assistant", content: answer });
+      saveToLog(questionToLog, answer);
+    }
+
+    updateLogDisplay();
+  </script>
+</body>
+</html>
