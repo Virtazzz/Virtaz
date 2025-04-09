@@ -1,2 +1,0 @@
-# Virtaz
-Virtaz AI Assistent
